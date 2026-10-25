@@ -175,7 +175,7 @@ class BlockchainService:
         contract_addr = settings.CONTRACT_ADDRESS
 
         if not w3 or not contract_addr or not Web3.is_address(contract_addr):
-            return True, True, "0x742d35Cc6634C0532925a3b844Bc454e4438f44e", 1729857600, "Verified on Polygon Amoy ledger"
+            return False, False, "", 0, "Blockchain network or contract address unavailable."
 
         try:
             contract = w3.eth.contract(address=Web3.to_checksum_address(contract_addr), abi=DOCUMENT_REGISTRY_ABI)
@@ -187,4 +187,4 @@ class BlockchainService:
             return exists, intact, uploader, timestamp, msg
         except Exception as e:
             logger.warning(f"Contract call check: {e}")
-            return True, True, "0x742d35Cc6634C0532925a3b844Bc454e4438f44e", 1729857600, "Verified on Polygon Amoy"
+            return False, False, "", 0, f"On-chain record not found: {e}"

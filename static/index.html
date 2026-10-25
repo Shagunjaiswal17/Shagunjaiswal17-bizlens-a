@@ -184,13 +184,25 @@
         checkWalletConnection();
       }, []);
 
-      const checkWalletConnection = async () => {
+      const getMetaMaskProvider = () => {
         if (window.ethereum) {
+          if (window.ethereum.providers && window.ethereum.providers.length) {
+            const mm = window.ethereum.providers.find(p => p.isMetaMask);
+            if (mm) return mm;
+          }
+          return window.ethereum;
+        }
+        return null;
+      };
+
+      const checkWalletConnection = async () => {
+        const provider = getMetaMaskProvider();
+        if (provider) {
           try {
-            const accounts = await window.ethereum.request({ method: "eth_accounts" });
+            const accounts = await provider.request({ method: "eth_accounts" });
             if (accounts.length > 0) {
               setWalletAddress(accounts[0]);
-              const chainId = await window.ethereum.request({ method: "eth_chainId" });
+              const chainId = await provider.request({ method: "eth_chainId" });
               setIsAmoyNetwork(chainId === POLYGON_AMOY_CHAIN_ID);
             }
           } catch (e) {
@@ -200,16 +212,83 @@
       };
 
       const connectWallet = async () => {
-        if (!window.ethereum) {
-          alert("MetaMask not found! Please install MetaMask to use Web3 features.");
+        const provider = getMetaMaskProvider();
+        if (!provider) {
+          const useDemo = confirm(
+            "MetaMask extension was not detected in this browser window.\n\n" +
+            "Would you like to connect using the BizLens Demo Web3 Wallet (0x742d...f44e) to test on-chain notarization on Polygon Amoy?"
+          );
+          if (useDemo) {
+            const demoAddr = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e";
+            setWalletAddress(demoAddr);
+            setIsAmoyNetwork(true);
+            triggerToast("Connected via Demo Web3 Wallet: 0x742d...f44e");
+          }
           return;
         }
+
         try {
-          const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-          setWalletAddress(accounts[0]);
-          triggerToast(`Connected: ${accounts[0].slice(0, 6)}...${accounts[0].slice(-4)}`);
+          const accounts = await provider.request({ method: "eth_requestAccounts" });
+          if (!accounts || accounts.length === 0) {
+            triggerToast("No accounts selected in MetaMask.");
+            return;
+          }
+          const userAddress = accounts[0];
+          setWalletAddress(userAddress);
+
+          // Check & Switch network to Polygon Amoy (80002)
+          try {
+            const chainId = await provider.request({ method: "eth_chainId" });
+            if (chainId !== POLYGON_AMOY_CHAIN_ID) {
+              await provider.request({
+                method: "wallet_switchEthereumChain",
+                params: [{ chainId: POLYGON_AMOY_CHAIN_ID }]
+              });
+              setIsAmoyNetwork(true);
+            } else {
+              setIsAmoyNetwork(true);
+            }
+          } catch (switchError) {
+            if (switchError.code === 4902) {
+              try {
+                await provider.request({
+                  method: "wallet_addEthereumChain",
+                  params: [{
+                    chainId: POLYGON_AMOY_CHAIN_ID,
+                    chainName: "Polygon Amoy Testnet",
+                    nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
+                    rpcUrls: ["https://rpc-amoy.polygon.technology"],
+                    blockExplorerUrls: ["https://amoy.polygonscan.com"]
+                  }]
+                });
+                setIsAmoyNetwork(true);
+              } catch (addError) {
+                console.warn("Could not add Amoy network:", addError);
+              }
+            }
+          }
+
+          triggerToast(`MetaMask Connected: ${userAddress.slice(0, 6)}...${userAddress.slice(-4)}`);
         } catch (err) {
-          triggerToast("Wallet connection cancelled.");
+          console.error("MetaMask connection error:", err);
+          if (err.code === -32002) {
+            alert(
+              "MetaMask connection request is already pending in your browser!\n\n" +
+              "Please click the MetaMask fox icon in your browser's extension toolbar to approve the connection."
+            );
+          } else if (err.code === 4001) {
+            triggerToast("Connection was rejected in MetaMask.");
+          } else {
+            const useDemo = confirm(
+              `MetaMask connection note: ${err.message || 'Window closed'}.\n\n` +
+              "Would you like to connect with the BizLens Demo Web3 Wallet (0x742d...f44e) instead?"
+            );
+            if (useDemo) {
+              setWalletAddress("0x742d35Cc6634C0532925a3b844Bc454e4438f44e");
+              setIsAmoyNetwork(true);
+              triggerToast("Connected via Demo Web3 Wallet!");
+            }
+          }
         }
       };
 
@@ -472,17 +551,40 @@
 
               {/* MetaMask Connect */}
               {walletAddress ? (
-                <div className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-cyan-950/80 border border-cyan-500/40 text-cyanGlow text-xs font-mono">
+                <div
+                  onClick={() => {
+                    if (confirm(`Connected: ${walletAddress}\n\nWould you like to disconnect?`)) {
+                      setWalletAddress(null);
+                      triggerToast("Wallet disconnected.");
+                    }
+                  }}
+                  title="Click to disconnect wallet"
+                  className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-cyan-950/80 border border-cyan-500/40 text-cyanGlow text-xs font-mono cursor-pointer hover:border-red-500/50 transition"
+                >
                   <span className="w-2 h-2 rounded-full bg-cyanGlow"></span>
                   <span>{walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}</span>
+                  <span className="text-[10px] text-gray-400 ml-1">✕</span>
                 </div>
               ) : (
-                <button
-                  onClick={connectWallet}
-                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyanGlow to-cyan-500 text-dark-900 font-bold text-xs shadow-lg shadow-cyanGlow/20 hover:opacity-90 transition flex items-center space-x-2"
-                >
-                  <span>🦊 Connect MetaMask</span>
-                </button>
+                <div className="flex items-center space-x-1.5">
+                  <button
+                    onClick={connectWallet}
+                    className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyanGlow to-cyan-500 text-dark-900 font-bold text-xs shadow-lg shadow-cyanGlow/20 hover:opacity-90 transition flex items-center space-x-1.5"
+                  >
+                    <span>🦊 Connect MetaMask</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setWalletAddress("0x742d35Cc6634C0532925a3b844Bc454e4438f44e");
+                      setIsAmoyNetwork(true);
+                      triggerToast("Connected via Demo Web3 Wallet: 0x742d...f44e");
+                    }}
+                    title="1-Click Demo Web3 Wallet (No extension required)"
+                    className="px-2.5 py-2 rounded-xl bg-dark-700 hover:bg-dark-600 text-gray-300 text-xs font-mono border border-white/10"
+                  >
+                    Demo ⚡
+                  </button>
+                </div>
               )}
             </div>
           </header>

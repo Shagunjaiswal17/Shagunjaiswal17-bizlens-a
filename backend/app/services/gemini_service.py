@@ -132,6 +132,12 @@ Extract everything faithfully conforming to the requested schema.
         return cls._generate_dynamic_extraction(file_bytes, filename, mime_type)
 
     @classmethod
+    def _get_offline_fallback(cls, filename: str) -> UnifiedDocumentExtraction:
+        """Backward-compatible helper for tests and offline evaluation."""
+        sample_bytes = filename.encode("utf-8") + b"_bizlens_offline_seed"
+        return cls._generate_dynamic_extraction(sample_bytes, filename, "image/jpeg")
+
+    @classmethod
     def _generate_dynamic_extraction(
         cls,
         file_bytes: bytes,

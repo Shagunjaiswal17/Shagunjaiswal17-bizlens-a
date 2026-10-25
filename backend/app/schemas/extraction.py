@@ -32,6 +32,21 @@ class CardContactDetails(BaseModel):
     tags: List[str] = Field(default_factory=list, description="Keywords, industries, or services")
 
 
+class FieldConfidences(BaseModel):
+    """Per-field confidence scores assessed by the model from 0.0 to 1.0."""
+    vendor_name: float = Field(default=0.95, description="Confidence in vendor identification")
+    document_number: float = Field(default=0.92, description="Confidence in document number")
+    total_amount: float = Field(default=0.98, description="Confidence in total amount")
+    dates: float = Field(default=0.90, description="Confidence in date extraction")
+    line_items: float = Field(default=0.88, description="Confidence in line items")
+
+    def get(self, key: str, default: float = 0.90) -> float:
+        return getattr(self, key, default)
+
+    def __getitem__(self, key: str) -> float:
+        return getattr(self, key)
+
+
 class UnifiedDocumentExtraction(BaseModel):
     """
     Unified extraction schema passed directly to Gemini 2.5 Flash `response_schema`.
@@ -71,14 +86,8 @@ class UnifiedDocumentExtraction(BaseModel):
     card_details: Optional[CardContactDetails] = Field(default=None, description="Populated if document_type is BUSINESS_CARD")
 
     # Confidence assessment
-    field_confidences: Dict[str, float] = Field(
-        default_factory=lambda: {
-            "vendor_name": 0.95,
-            "document_number": 0.92,
-            "total_amount": 0.98,
-            "dates": 0.90,
-            "line_items": 0.88
-        },
+    field_confidences: FieldConfidences = Field(
+        default_factory=FieldConfidences,
         description="Per-field confidence scores assessed by the model from 0.0 to 1.0"
     )
 
