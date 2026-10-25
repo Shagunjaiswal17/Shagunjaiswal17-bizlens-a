@@ -40,10 +40,36 @@ class DocumentResponse(BaseModel):
     notarized_at: Optional[str] = None
 
 
+class BatchScanSummary(BaseModel):
+    """Comprehensive multi-bill batch reconciliation intelligence."""
+    total_files_processed: int
+    total_batch_spend: float
+    total_tax_amount: float
+    categories_detected: Dict[str, float] = {}
+    cross_bill_duplicates_detected: List[str] = []
+    anomalies_flagged: int
+    payment_priorities: Dict[str, int] = {}
+    documents: List[DocumentResponse]
+
+
 class NotarizeRequest(BaseModel):
     """Payload to notarize an existing document on-chain."""
     tx_hash: Optional[str] = Field(default=None, description="MetaMask client-signed transaction hash if signed on frontend")
     ipfs_cid: Optional[str] = Field(default=None, description="Optional IPFS Pinata CID")
+
+
+class BatchNotarizeRequest(BaseModel):
+    document_ids: List[int]
+    tx_hash: Optional[str] = None
+
+
+class BatchNotarizeResponse(BaseModel):
+    success: bool
+    notarized_count: int
+    document_ids: List[int]
+    tx_hash: str
+    polygonscan_url: str
+    message: str
 
 
 class NotarizeResponse(BaseModel):

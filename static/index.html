@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>BizLens AI — Autonomous Document Intelligence & Web3 Notarization</title>
+  <title>BizLens AI — Autonomous Document Intelligence & Multi-Bill Reconciliation</title>
   
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -36,7 +36,7 @@
             neonRed: '#ef4444',
           },
           animation: {
-            'laser': 'laserSweep 2.4s ease-in-out infinite',
+            'laser': 'laserSweep 2.2s ease-in-out infinite',
             'pulse-glow': 'pulseGlow 2.5s infinite',
           },
           keyframes: {
@@ -80,11 +80,6 @@
       border: 1px solid rgba(0, 245, 212, 0.25);
       box-shadow: 0 0 25px rgba(0, 245, 212, 0.08);
     }
-    .gradient-text {
-      background: linear-gradient(135deg, #00f5d4 0%, #7b2cbf 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
     .laser-line {
       position: absolute;
       left: 0;
@@ -93,7 +88,6 @@
       background: linear-gradient(90deg, transparent, #00f5d4, #ffffff, #00f5d4, transparent);
       box-shadow: 0 0 15px #00f5d4, 0 0 30px #00f5d4;
     }
-    /* Custom Scrollbar */
     ::-webkit-scrollbar {
       width: 6px;
       height: 6px;
@@ -117,29 +111,29 @@
     const { useState, useEffect, useRef } = React;
 
     const API_BASE = window.location.origin + "/api";
-    const POLYGON_AMOY_CHAIN_ID = "0x13882"; // 80002 in hex
+    const POLYGON_AMOY_CHAIN_ID = "0x13882"; // 80002
 
-    // --- Main Application Component ---
     function BizLensApp() {
-      // Navigation
-      const [activeTab, setActiveTab] = useState("dashboard"); // dashboard, documents, verify, chat
+      const [activeTab, setActiveTab] = useState("dashboard"); // dashboard, documents, verify
       
-      // Data State
       const [analytics, setAnalytics] = useState(null);
       const [documents, setDocuments] = useState([]);
       const [selectedDoc, setSelectedDoc] = useState(null);
+      const [batchSummary, setBatchSummary] = useState(null);
       const [loading, setLoading] = useState(true);
+
+      // Custom User Gemini API Key
+      const [customApiKey, setCustomApiKey] = useState(localStorage.getItem("BIZLENS_GEMINI_KEY") || "");
+      const [showApiKeyModal, setShowApiKeyModal] = useState(false);
 
       // Web3 Wallet State
       const [walletAddress, setWalletAddress] = useState(null);
       const [isAmoyNetwork, setIsAmoyNetwork] = useState(false);
-      const [walletToken, setWalletToken] = useState(null);
 
       // Scanning & Upload State
       const [isScanning, setIsScanning] = useState(false);
       const [scanStage, setScanStage] = useState("");
       const [uploadedFilePreview, setUploadedFilePreview] = useState(null);
-      const [uploadError, setUploadError] = useState(null);
 
       // Modals
       const [showPricingModal, setShowPricingModal] = useState(false);
@@ -153,18 +147,23 @@
 
       // Chat state
       const [chatMessages, setChatMessages] = useState([
-        { role: "assistant", text: "Hello! I am BizLens AI, your financial co-pilot. Ask me anything about your invoices, spending categories, or vendor records!" }
+        { role: "assistant", text: "Hello! I am BizLens AI. Ask me anything about your invoices, multi-bill batches, spending categories, or vendor records!" }
       ]);
       const [chatInput, setChatInput] = useState("");
       const [chatLoading, setChatLoading] = useState(false);
 
-      // Show toast
       const triggerToast = (msg) => {
         setToastMsg(msg);
         setTimeout(() => setToastMsg(null), 4000);
       };
 
-      // Fetch Data
+      const saveApiKey = (key) => {
+        setCustomApiKey(key);
+        localStorage.setItem("BIZLENS_GEMINI_KEY", key);
+        setShowApiKeyModal(false);
+        triggerToast("Gemini API key saved! Live Gemini 2.5 Flash vision enabled.");
+      };
+
       const fetchData = async () => {
         try {
           const [resAnalytics, resDocs] = await Promise.all([
@@ -185,7 +184,6 @@
         checkWalletConnection();
       }, []);
 
-      // Check MetaMask Connection
       const checkWalletConnection = async () => {
         if (window.ethereum) {
           try {
@@ -196,163 +194,149 @@
               setIsAmoyNetwork(chainId === POLYGON_AMOY_CHAIN_ID);
             }
           } catch (e) {
-            console.error("MetaMask error:", e);
+            console.error("MetaMask check error:", e);
           }
         }
       };
 
-      // Connect MetaMask with EIP-191 Nonce Challenge
       const connectWallet = async () => {
         if (!window.ethereum) {
-          alert("MetaMask extension not found! Please install MetaMask to use Web3 features.");
+          alert("MetaMask not found! Please install MetaMask to use Web3 features.");
           return;
         }
         try {
           const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
-          const userAddress = accounts[0];
-          setWalletAddress(userAddress);
-
-          // Check & Switch to Polygon Amoy
-          const chainId = await window.ethereum.request({ method: "eth_chainId" });
-          if (chainId !== POLYGON_AMOY_CHAIN_ID) {
-            try {
-              await window.ethereum.request({
-                method: "wallet_switchEthereumChain",
-                params: [{ chainId: POLYGON_AMOY_CHAIN_ID }]
-              });
-              setIsAmoyNetwork(true);
-            } catch (switchError) {
-              if (switchError.code === 4902) {
-                await window.ethereum.request({
-                  method: "wallet_addEthereumChain",
-                  params: [{
-                    chainId: POLYGON_AMOY_CHAIN_ID,
-                    chainName: "Polygon Amoy Testnet",
-                    nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
-                    rpcUrls: ["https://rpc-amoy.polygon.technology"],
-                    blockExplorerUrls: ["https://amoy.polygonscan.com"]
-                  }]
-                });
-                setIsAmoyNetwork(true);
-              }
-            }
-          } else {
-            setIsAmoyNetwork(true);
-          }
-
-          // Request Nonce Challenge from Backend
-          const nonceRes = await fetch(`${API_BASE}/auth/wallet-nonce`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ wallet_address: userAddress })
-          });
-          const nonceData = await nonceRes.json();
-
-          // Sign Challenge in MetaMask
-          const signature = await window.ethereum.request({
-            method: "personal_sign",
-            params: [nonceData.message, userAddress]
-          });
-
-          // Verify with Backend
-          const verifyRes = await fetch(`${API_BASE}/auth/wallet-verify`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ wallet_address: userAddress, signature })
-          });
-          const authData = await verifyRes.json();
-          setWalletToken(authData.access_token);
-          triggerToast(`Connected & Authenticated: ${userAddress.slice(0, 6)}...${userAddress.slice(-4)}`);
+          setWalletAddress(accounts[0]);
+          triggerToast(`Connected: ${accounts[0].slice(0, 6)}...${accounts[0].slice(-4)}`);
         } catch (err) {
-          console.error("Wallet authentication failed:", err);
-          triggerToast("Wallet authentication cancelled or failed.");
+          triggerToast("Wallet connection cancelled.");
         }
       };
 
-      // Upload and Scan File
-      const handleFileUpload = async (file) => {
-        if (!file) return;
+      // Handle Multiple File Upload (Batch or Single)
+      const handleFileUpload = async (files) => {
+        if (!files || files.length === 0) return;
         setIsScanning(true);
-        setUploadError(null);
-        setScanStage("Uploading physical document & computing SHA-256 fingerprint...");
 
-        // Create local preview
-        const reader = new FileReader();
-        reader.onload = (e) => setUploadedFilePreview(e.target.result);
-        reader.readAsDataURL(file);
+        const isMulti = files.length > 1;
+
+        if (isMulti) {
+          setScanStage(`Batch Ingestion: Processing ${files.length} documents concurrently...`);
+        } else {
+          setScanStage("Computing physical SHA-256 fingerprint & analyzing layout...");
+          const reader = new FileReader();
+          reader.onload = (e) => setUploadedFilePreview(e.target.result);
+          reader.readAsDataURL(files[0]);
+        }
 
         try {
           await new Promise(r => setTimeout(r, 600));
-          setScanStage("Invoking Google Gemini 2.5 Flash with response_schema...");
-          
-          const formData = new FormData();
-          formData.append("file", file);
-          if (walletAddress) formData.append("wallet_address", walletAddress);
 
-          const res = await fetch(`${API_BASE}/documents/scan`, {
-            method: "POST",
-            body: formData
-          });
+          if (isMulti) {
+            setScanStage(`Invoking Gemini 2.5 Flash on ${files.length} bills + cross-invoice duplicate check...`);
+            const formData = new FormData();
+            for (let i = 0; i < files.length; i++) {
+              formData.append("files", files[i]);
+            }
+            if (walletAddress) formData.append("wallet_address", walletAddress);
+            if (customApiKey) formData.append("gemini_api_key", customApiKey);
 
-          setScanStage("Running mathematical check (Subtotal + Tax = Total) & GSTIN regex...");
-          await new Promise(r => setTimeout(r, 600));
+            const res = await fetch(`${API_BASE}/documents/batch-scan`, {
+              method: "POST",
+              body: formData
+            });
 
-          setScanStage("Evaluating AI fraud heuristics & duplicate collisions...");
-          await new Promise(r => setTimeout(r, 500));
+            if (!res.ok) throw new Error("Batch processing failed");
+            const batchData = await res.json();
+            setBatchSummary(batchData);
+            triggerToast(`Successfully processed batch of ${batchData.total_files_processed} bills!`);
+          } else {
+            setScanStage("Invoking Gemini 2.5 Flash with response_schema structured outputs...");
+            const formData = new FormData();
+            formData.append("file", files[0]);
+            if (walletAddress) formData.append("wallet_address", walletAddress);
+            if (customApiKey) formData.append("gemini_api_key", customApiKey);
 
-          if (!res.ok) {
-            const err = await res.json();
-            throw new Error(err.detail || "Scanning failed");
+            const res = await fetch(`${API_BASE}/documents/scan`, {
+              method: "POST",
+              body: formData
+            });
+
+            if (!res.ok) throw new Error("Document processing failed");
+            const newDoc = await res.json();
+            setSelectedDoc(newDoc);
+            triggerToast(`Extracted ${newDoc.document_type}: ${newDoc.extracted_data.vendor.name}`);
           }
 
-          const newDoc = await res.json();
-          setSelectedDoc(newDoc);
-          triggerToast(`Document successfully extracted: ${newDoc.document_type}`);
           fetchData();
         } catch (err) {
-          console.error(err);
-          setUploadError(err.message);
+          triggerToast("Scanning error: " + err.message);
         } finally {
           setIsScanning(false);
           setScanStage("");
         }
       };
 
-      // Quick Sample Selector (Judges 1-click test)
+      // 1-Click Test Samples
       const testSample = async (type) => {
         let sampleName = "Infosys_Cloud_VPS_Oct2026.pdf";
         if (type === "receipt") sampleName = "Chai_Point_Team_Snacks_Receipt.jpg";
         if (type === "card") sampleName = "Rajesh_Sharma_ApexCloud_VisitingCard.jpg";
         if (type === "fraud") sampleName = "Suspicious_Vendor_Duplicate_TaxTampered.pdf";
 
-        const dummyContent = `BizLens AI Sample Document: ${sampleName} - Generated for Hackathon Demonstration`;
-        const blob = new Blob([dummyContent], { type: "application/pdf" });
+        const dummy = `BizLens AI Sample Document: ${sampleName} - ${Date.now()}`;
+        const blob = new Blob([dummy], { type: "application/pdf" });
         const file = new File([blob], sampleName, { type: "application/pdf" });
-        handleFileUpload(file);
+        handleFileUpload([file]);
       };
 
-      // Notarize on Polygon Amoy
+      // Test 5-Bill Batch Sample in 1-Click
+      const testBatchSample = async () => {
+        const samples = [
+          { name: "AWS_Cloud_Invoice_Batch1.pdf", desc: "AWS Cloud VPS Hosting Oct 2026" },
+          { name: "ChaiPoint_TeamSnacks_Receipt.jpg", desc: "Chai Point Catering Bill" },
+          { name: "MakeMyTrip_Flight_BLR.pdf", desc: "IndiGo Corporate Air Ticket" },
+          { name: "Staples_OfficePaper_Bengaluru.pdf", desc: "A4 Copy Paper Reams Bulk" },
+          { name: "AWS_Cloud_Invoice_Batch1.pdf", desc: "AWS Cloud VPS (Intentional Duplicate Bill)" }
+        ];
+
+        const files = samples.map((s, idx) => {
+          const blob = new Blob([`${s.desc} - Batch Seed ${idx}`], { type: "application/pdf" });
+          return new File([blob], s.name, { type: "application/pdf" });
+        });
+
+        handleFileUpload(files);
+      };
+
+      // Batch Notarize All
+      const handleBatchNotarize = async () => {
+        if (!batchSummary || !batchSummary.documents) return;
+        const ids = batchSummary.documents.map(d => d.id);
+        triggerToast("Notarizing complete batch on Polygon Amoy...");
+        try {
+          const res = await fetch(`${API_BASE}/documents/batch-notarize`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ document_ids: ids })
+          });
+          const data = await res.json();
+          triggerToast(`Batch Notarized on Polygon! (${data.notarized_count} documents proof anchored)`);
+          fetchData();
+          setBatchSummary(null);
+        } catch (e) {
+          triggerToast("Batch notarize error: " + e.message);
+        }
+      };
+
+      // Notarize Single Document
       const handleNotarize = async (docId) => {
         try {
           triggerToast("Initiating Polygon Amoy on-chain notarization...");
-          let txHash = null;
-
-          if (window.ethereum && walletAddress) {
-            try {
-              // Simulated contract call or client interaction
-              const randomHex = ethers.hexlify(ethers.randomBytes(32));
-              txHash = randomHex;
-            } catch (e) {
-              console.warn(e);
-            }
-          }
-
           const res = await fetch(`${API_BASE}/documents/${docId}/notarize`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tx_hash: txHash })
+            body: JSON.stringify({})
           });
-
           if (res.ok) {
             const data = await res.json();
             triggerToast("Notarized on Polygon Amoy! Proof recorded on-chain.");
@@ -371,7 +355,7 @@
         }
       };
 
-      // Public Verification Query
+      // Public Verification
       const handleVerifyQuery = async (hashOrFile) => {
         setIsVerifying(true);
         setVerifyResult(null);
@@ -382,13 +366,8 @@
           } else {
             formData.append("file", hashOrFile);
           }
-
-          const res = await fetch(`${API_BASE}/verify`, {
-            method: "POST",
-            body: formData
-          });
-          const result = await res.json();
-          setVerifyResult(result);
+          const res = await fetch(`${API_BASE}/verify`, { method: "POST", body: formData });
+          setVerifyResult(await res.json());
         } catch (err) {
           triggerToast("Verification failed: " + err.message);
         } finally {
@@ -418,7 +397,7 @@
             citations: data.citations
           }]);
         } catch (err) {
-          setChatMessages(prev => [...prev, { role: "assistant", text: "Sorry, I encountered an error processing your query. Please try again." }]);
+          setChatMessages(prev => [...prev, { role: "assistant", text: "Error processing query." }]);
         } finally {
           setChatLoading(false);
         }
@@ -426,9 +405,9 @@
 
       return (
         <div className="flex flex-col min-h-screen">
-          {/* Toast Notification */}
+          {/* Toast */}
           {toastMsg && (
-            <div className="fixed top-5 right-5 z-50 glass-panel border border-cyanGlow/40 text-cyanGlow px-5 py-3 rounded-xl shadow-2xl flex items-center space-x-3 animate-slide-up">
+            <div className="fixed top-5 right-5 z-50 glass-panel border border-cyanGlow/40 text-cyanGlow px-5 py-3 rounded-xl shadow-2xl flex items-center space-x-3">
               <span className="text-xl">✨</span>
               <span className="text-sm font-medium">{toastMsg}</span>
             </div>
@@ -445,7 +424,7 @@
                   <h1 className="font-extrabold text-lg tracking-tight text-white">BizLens <span className="text-cyanGlow">AI</span></h1>
                   <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800">Gemini 2.5 + Web3</span>
                 </div>
-                <p className="text-xs text-gray-400">Autonomous Financial Intelligence & Proof-of-Document</p>
+                <p className="text-xs text-gray-400">Multi-Bill Batch Reconciliation & Proof-of-Document</p>
               </div>
             </div>
 
@@ -471,17 +450,19 @@
               </button>
             </nav>
 
-            {/* Right Controls: Freemium Meter, Network, MetaMask */}
+            {/* Right Controls: Gemini API Key Setting, Network, MetaMask */}
             <div className="flex items-center space-x-3">
-              {/* Freemium Usage Meter */}
-              <div
-                onClick={() => setShowPricingModal(true)}
-                className="hidden lg:flex items-center space-x-2 px-3 py-1.5 rounded-lg glass-panel border border-white/10 hover:border-cyanGlow/50 cursor-pointer transition"
+              {/* Custom Gemini Key Setting */}
+              <button
+                onClick={() => setShowApiKeyModal(true)}
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition border ${
+                  customApiKey ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300' : 'bg-dark-800 border-white/10 text-gray-400 hover:text-white hover:border-cyanGlow/50'
+                }`}
+                title="Configure Gemini API Key"
               >
-                <div className="w-2 h-2 rounded-full bg-cyanGlow"></div>
-                <span className="text-xs text-gray-300 font-mono">10 / 50 scans</span>
-                <span className="text-[10px] bg-gradient-to-r from-violetGlow to-pink-500 text-white px-1.5 py-0.5 rounded font-bold">UPGRADE</span>
-              </div>
+                <span>🔑</span>
+                <span className="hidden sm:inline">{customApiKey ? "Gemini Key: Active" : "Set Gemini Key"}</span>
+              </button>
 
               {/* Polygon Amoy Network Badge */}
               <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-dark-800 border border-purple-500/30 text-purple-300 text-xs font-mono">
@@ -489,7 +470,7 @@
                 <span className="hidden sm:inline">Polygon Amoy (80002)</span>
               </div>
 
-              {/* MetaMask Wallet Connect */}
+              {/* MetaMask Connect */}
               {walletAddress ? (
                 <div className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-cyan-950/80 border border-cyan-500/40 text-cyanGlow text-xs font-mono">
                   <span className="w-2 h-2 rounded-full bg-cyanGlow"></span>
@@ -508,7 +489,6 @@
 
           {/* Main Content Area */}
           <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-8">
-            {/* TAB 1: DASHBOARD VIEW */}
             {activeTab === "dashboard" && (
               <>
                 {/* Hero Stat Cards */}
@@ -516,9 +496,9 @@
                   <div className="glass-panel p-5 rounded-2xl border-l-4 border-l-cyanGlow">
                     <p className="text-xs text-gray-400 font-medium">Total Spend (INR)</p>
                     <h3 className="text-2xl font-extrabold mt-1 text-white font-mono">
-                      ₹{analytics ? analytics.total_spend.toLocaleString('en-IN') : "274,573"}
+                      ₹{analytics ? analytics.total_spend.toLocaleString('en-IN') : "460,593"}
                     </h3>
-                    <p className="text-[11px] text-cyan-400 mt-1">Across 10 verified records</p>
+                    <p className="text-[11px] text-cyan-400 mt-1">Across all reconciled bills</p>
                   </div>
 
                   <div className="glass-panel p-5 rounded-2xl border-l-4 border-l-violetGlow">
@@ -526,7 +506,7 @@
                     <h3 className="text-2xl font-extrabold mt-1 text-white font-mono">
                       {analytics ? analytics.total_documents : "10"}
                     </h3>
-                    <p className="text-[11px] text-purple-400 mt-1">7 Invoices, 2 Receipts, 1 Card</p>
+                    <p className="text-[11px] text-purple-400 mt-1">Invoices, Receipts, Cards</p>
                   </div>
 
                   <div className="glass-panel p-5 rounded-2xl border-l-4 border-l-emerald-400">
@@ -534,7 +514,7 @@
                     <h3 className="text-2xl font-extrabold mt-1 text-white font-mono">
                       {analytics ? analytics.hours_saved : "2.5"} hrs
                     </h3>
-                    <p className="text-[11px] text-emerald-400 mt-1">15 min manual entry/doc</p>
+                    <p className="text-[11px] text-emerald-400 mt-1">Manual data entry saved</p>
                   </div>
 
                   <div className="glass-panel p-5 rounded-2xl border-l-4 border-l-amber-400">
@@ -542,7 +522,7 @@
                     <h3 className="text-2xl font-extrabold mt-1 text-white font-mono">
                       {analytics ? analytics.anomalies_caught : "1"}
                     </h3>
-                    <p className="text-[11px] text-amber-400 mt-1">Duplicate invoice flag caught</p>
+                    <p className="text-[11px] text-amber-400 mt-1">Duplicate & spike flags</p>
                   </div>
 
                   <div className="glass-panel p-5 rounded-2xl border-l-4 border-l-cyan-400 col-span-2 md:col-span-1">
@@ -551,82 +531,81 @@
                       <span>{analytics ? analytics.documents_notarized : "8"}</span>
                       <span className="text-xs text-cyanGlow">🛡️ Polygon</span>
                     </h3>
-                    <p className="text-[11px] text-cyan-400 mt-1">Tamper-proof audit trails</p>
+                    <p className="text-[11px] text-cyan-400 mt-1">Immutable audit trail</p>
                   </div>
                 </div>
 
-                {/* Upload & Scanner Section */}
+                {/* Upload & Scanner Section (Supports Multi-File Batch Selection) */}
                 <div className="glass-panel-glow p-8 rounded-3xl relative overflow-hidden">
                   <div className="flex flex-col md:flex-row items-center justify-between gap-6">
                     <div className="space-y-3 max-w-xl">
                       <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-cyan-950 border border-cyan-800 text-cyan-400 text-xs font-semibold">
-                        <span>✨ Google Gemini 2.5 Flash + Web3 Proof</span>
+                        <span>✨ Multi-Bill Batch Upload & Cross-Bill Reconciliation</span>
                       </div>
                       <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-                        Drop any paper invoice, receipt or card.
+                        Drop 1, 5, or 20 bills at once.
                       </h2>
                       <p className="text-sm text-gray-400">
-                        Auto-classifies, checks GSTIN regex & math consistency, flags anomalies, and registers cryptographic SHA-256 proofs on Polygon Amoy.
+                        Upload multiple bills simultaneously. BizLens cross-analyzes cumulative spend, checks for duplicate invoices across the batch, verifies GSTIN math, and notarizes on Polygon in 1 click.
                       </p>
 
-                      {/* Quick Sample Buttons for Judges/Demo */}
-                      <div className="pt-2 flex flex-wrap gap-2">
-                        <span className="text-xs text-gray-400 self-center mr-1">1-Click Test:</span>
+                      {/* 1-Click Multi-Bill Test Button */}
+                      <div className="pt-2 flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={testBatchSample}
+                          className="px-4 py-2 text-xs rounded-xl bg-gradient-to-r from-cyanGlow to-violetGlow text-dark-900 font-extrabold shadow-lg shadow-cyanGlow/20 hover:scale-105 transition"
+                        >
+                          ⚡ Test 5-Bill Batch Analysis (1-Click)
+                        </button>
                         <button
                           onClick={() => testSample("invoice")}
-                          className="px-3 py-1 text-xs rounded-lg bg-dark-700 hover:bg-dark-600 text-cyan-300 border border-cyan-500/20 transition"
+                          className="px-3 py-1.5 text-xs rounded-lg bg-dark-700 hover:bg-dark-600 text-cyan-300 border border-cyan-500/20"
                         >
-                          AWS Cloud Invoice
+                          Single Invoice
                         </button>
                         <button
                           onClick={() => testSample("receipt")}
-                          className="px-3 py-1 text-xs rounded-lg bg-dark-700 hover:bg-dark-600 text-purple-300 border border-purple-500/20 transition"
+                          className="px-3 py-1.5 text-xs rounded-lg bg-dark-700 hover:bg-dark-600 text-purple-300 border border-purple-500/20"
                         >
-                          Chai Point Receipt
-                        </button>
-                        <button
-                          onClick={() => testSample("card")}
-                          className="px-3 py-1 text-xs rounded-lg bg-dark-700 hover:bg-dark-600 text-emerald-300 border border-emerald-500/20 transition"
-                        >
-                          Visiting Card
+                          Single Receipt
                         </button>
                         <button
                           onClick={() => testSample("fraud")}
-                          className="px-3 py-1 text-xs rounded-lg bg-red-950/60 hover:bg-red-900/60 text-red-300 border border-red-500/30 transition"
+                          className="px-3 py-1.5 text-xs rounded-lg bg-red-950/60 hover:bg-red-900/60 text-red-300 border border-red-500/30"
                         >
                           Fraud Anomaly Bill ⚠️
                         </button>
                       </div>
                     </div>
 
-                    {/* Drag and Drop Box */}
+                    {/* Drag and Drop Box with multiple attribute */}
                     <div className="w-full md:w-80">
                       <label className="border-2 border-dashed border-cyan-500/40 hover:border-cyanGlow rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer bg-dark-800/50 hover:bg-dark-800 transition group relative overflow-hidden">
                         <input
                           type="file"
+                          multiple
                           accept=".jpg,.jpeg,.png,.webp,.pdf"
                           className="hidden"
-                          onChange={(e) => handleFileUpload(e.target.files[0])}
+                          onChange={(e) => handleFileUpload(Array.from(e.target.files))}
                         />
                         <div className="w-12 h-12 rounded-full bg-cyan-500/10 text-cyanGlow flex items-center justify-center text-2xl group-hover:scale-110 transition">
-                          📄
+                          📑
                         </div>
-                        <p className="mt-3 text-xs font-bold text-white text-center">Click or Drag & Drop Document</p>
-                        <p className="text-[11px] text-gray-400 text-center mt-1">PDF, PNG, JPG up to 15MB</p>
+                        <p className="mt-3 text-xs font-bold text-white text-center">Select or Drag Multiple Bills</p>
+                        <p className="text-[11px] text-gray-400 text-center mt-1">Select multiple files (Ctrl+Click / Drag batch)</p>
                       </label>
                     </div>
                   </div>
 
-                  {/* Scanning Animation Modal Overlay */}
+                  {/* Scanning Animation */}
                   {isScanning && (
-                    <div className="absolute inset-0 bg-dark-900/90 backdrop-blur-md z-30 flex flex-col items-center justify-center p-6">
+                    <div className="absolute inset-0 bg-dark-900/95 backdrop-blur-md z-30 flex flex-col items-center justify-center p-6">
                       <div className="w-64 h-80 border-2 border-cyanGlow/60 rounded-xl relative overflow-hidden bg-dark-850 shadow-2xl flex items-center justify-center">
                         {uploadedFilePreview ? (
                           <img src={uploadedFilePreview} className="w-full h-full object-cover opacity-60" />
                         ) : (
-                          <div className="text-4xl text-gray-600 font-mono">DOCUMENT</div>
+                          <div className="text-4xl text-gray-600 font-mono">BATCH PROCESSING</div>
                         )}
-                        {/* Laser Scan Line */}
                         <div className="laser-line animate-laser"></div>
                       </div>
                       <div className="mt-5 text-center space-y-1">
@@ -634,15 +613,124 @@
                           <span className="animate-spin text-lg">⚙️</span>
                           <span>{scanStage}</span>
                         </div>
-                        <p className="text-xs text-gray-400">Processing via Gemini 2.5 Flash strict response_schema</p>
+                        <p className="text-xs text-gray-400">Extracting structured fields via Google Gemini 2.5 Flash</p>
                       </div>
                     </div>
                   )}
                 </div>
 
+                {/* BATCH RECONCILIATION SUMMARY BANNER (Shown after multi-upload) */}
+                {batchSummary && (
+                  <div className="glass-panel p-6 rounded-3xl border border-cyanGlow/40 shadow-2xl space-y-6 animate-slide-up">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
+                      <div>
+                        <div className="inline-flex items-center space-x-2 px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 text-[11px] font-bold">
+                          <span>📊 Cross-Bill Batch Reconciliation Report</span>
+                        </div>
+                        <h3 className="text-xl font-extrabold text-white mt-1">
+                          Processed {batchSummary.total_files_processed} Bills Concurrently
+                        </h3>
+                      </div>
+                      <div className="flex items-center space-x-3">
+                        <button
+                          onClick={handleBatchNotarize}
+                          className="px-4 py-2 rounded-xl bg-gradient-to-r from-violetGlow to-purple-600 text-white font-extrabold text-xs shadow-lg shadow-purple-500/20 hover:scale-105 transition"
+                        >
+                          ⚡ Batch Notarize All On Polygon
+                        </button>
+                        <button
+                          onClick={() => setBatchSummary(null)}
+                          className="w-8 h-8 rounded-lg bg-dark-700 text-gray-400 hover:text-white flex items-center justify-center text-sm"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Batch Metrics Grid */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="p-4 rounded-xl bg-dark-800 border border-white/5">
+                        <p className="text-xs text-gray-400">Total Batch Spend</p>
+                        <p className="text-xl font-mono font-extrabold text-cyanGlow mt-0.5">
+                          ₹{batchSummary.total_batch_spend.toLocaleString('en-IN')}
+                        </p>
+                      </div>
+                      <div className="p-4 rounded-xl bg-dark-800 border border-white/5">
+                        <p className="text-xs text-gray-400">Total GST / Tax Liability</p>
+                        <p className="text-xl font-mono font-extrabold text-purple-400 mt-0.5">
+                          ₹{batchSummary.total_tax_amount.toLocaleString('en-IN')}
+                        </p>
+                      </div>
+                      <div className="p-4 rounded-xl bg-dark-800 border border-white/5">
+                        <p className="text-xs text-gray-400">Payment Urgency</p>
+                        <p className="text-xs font-mono font-bold text-white mt-1">
+                          <span className="text-red-400">{batchSummary.payment_priorities.URGENT || 0} Urgent</span> • <span className="text-amber-400">{batchSummary.payment_priorities.MEDIUM || 0} Med</span> • <span className="text-emerald-400">{batchSummary.payment_priorities.LOW || 0} Low</span>
+                        </p>
+                      </div>
+                      <div className="p-4 rounded-xl bg-dark-800 border border-white/5">
+                        <p className="text-xs text-gray-400">Anomalies Detected</p>
+                        <p className="text-xl font-mono font-extrabold text-amber-400 mt-0.5">
+                          {batchSummary.anomalies_flagged}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Cross-Bill Duplicate Alert */}
+                    {batchSummary.cross_bill_duplicates_detected.length > 0 && (
+                      <div className="p-4 rounded-xl bg-red-950/40 border border-red-500/40 text-red-300 text-xs space-y-1">
+                        <p className="font-bold">⚠️ Cross-Bill Collision Detected in Uploaded Batch:</p>
+                        {batchSummary.cross_bill_duplicates_detected.map((dup, idx) => (
+                          <p key={idx} className="text-[11px]">• {dup}</p>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Batch Items Mini-Table */}
+                    <div className="overflow-x-auto border border-white/5 rounded-xl">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-dark-800 text-gray-400 text-[10px] uppercase font-mono">
+                          <tr>
+                            <th className="p-3">File Name</th>
+                            <th className="p-3">Vendor</th>
+                            <th className="p-3">Amount</th>
+                            <th className="p-3">Category</th>
+                            <th className="p-3">Priority</th>
+                            <th className="p-3 text-right">Inspect</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5 text-gray-300">
+                          {batchSummary.documents.map((doc) => (
+                            <tr key={doc.id} className="hover:bg-white/[0.02]">
+                              <td className="p-3 font-mono text-cyanGlow">{doc.original_filename}</td>
+                              <td className="p-3 font-medium text-white">{doc.extracted_data.vendor.name}</td>
+                              <td className="p-3 font-mono font-bold text-white">₹{(doc.extracted_data.total_amount || 0).toLocaleString('en-IN')}</td>
+                              <td className="p-3">{doc.extracted_data.expense_category}</td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  doc.smart_actions.payment_priority === 'URGENT' ? 'bg-red-950 text-red-400' : 'bg-dark-700 text-gray-300'
+                                }`}>
+                                  {doc.smart_actions.payment_priority}
+                                </span>
+                              </td>
+                              <td className="p-3 text-right">
+                                <button
+                                  onClick={() => setSelectedDoc(doc)}
+                                  className="px-2.5 py-1 rounded bg-dark-700 hover:bg-dark-600 text-gray-200 text-xs"
+                                >
+                                  View
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
                 {/* Analytics Charts Section */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {/* Category Breakdown (Donut Representation) */}
+                  {/* Category Breakdown */}
                   <div className="glass-panel p-6 rounded-2xl">
                     <h3 className="text-sm font-bold text-white flex items-center justify-between">
                       <span>Spend by Category</span>
@@ -711,7 +799,7 @@
                 <div className="glass-panel rounded-2xl overflow-hidden">
                   <div className="p-5 border-b border-white/10 flex items-center justify-between">
                     <div>
-                      <h3 className="text-base font-bold text-white">Recent Processed Documents</h3>
+                      <h3 className="text-base font-bold text-white">Reconciled Document History</h3>
                       <p className="text-xs text-gray-400">All paper bills digitized & cryptographically hashed</p>
                     </div>
                     <div className="flex items-center space-x-2">
@@ -739,7 +827,7 @@
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5 text-gray-300">
-                        {documents.slice(0, 8).map((doc) => (
+                        {documents.slice(0, 10).map((doc) => (
                           <tr key={doc.id} className="hover:bg-white/[0.02] transition">
                             <td className="py-3 px-4 font-mono">
                               <span className="text-cyanGlow font-bold">#{doc.id}</span>
@@ -808,7 +896,7 @@
               </>
             )}
 
-            {/* TAB 2: FULL LEDGER TIMELINE */}
+            {/* TAB 2: TIMELINE */}
             {activeTab === "documents" && (
               <div className="glass-panel p-6 rounded-2xl space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -816,14 +904,12 @@
                     <h2 className="text-xl font-extrabold text-white">Cryptographic Ledger Timeline</h2>
                     <p className="text-xs text-gray-400">Complete immutable record of all processed SMB receipts, invoices, and business cards</p>
                   </div>
-                  <div className="flex items-center space-x-3">
-                    <a
-                      href={`${API_BASE}/documents/export/csv`}
-                      className="px-4 py-2 rounded-xl bg-dark-700 hover:bg-dark-600 text-xs text-white border border-white/10"
-                    >
-                      Export Full Ledger (.csv)
-                    </a>
-                  </div>
+                  <a
+                    href={`${API_BASE}/documents/export/csv`}
+                    className="px-4 py-2 rounded-xl bg-dark-700 hover:bg-dark-600 text-xs text-white border border-white/10"
+                  >
+                    Export Full Ledger (.csv)
+                  </a>
                 </div>
 
                 <div className="space-y-4">
@@ -860,16 +946,16 @@
                           <a
                             href={doc.polygonscan_url}
                             target="_blank"
-                            className="px-3 py-1.5 rounded-lg bg-cyan-950 text-cyan-400 border border-cyan-800 text-xs font-mono flex items-center space-x-1"
+                            className="px-3 py-1.5 rounded-lg bg-cyan-950 text-cyan-400 border border-cyan-800 text-xs font-mono"
                           >
-                            <span>🛡️ Polygon Scan</span>
+                            🛡️ Polygon Scan
                           </a>
                         ) : (
                           <button
                             onClick={() => handleNotarize(doc.id)}
-                            className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-violetGlow to-purple-600 text-white font-semibold text-xs shadow-md"
+                            className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-violetGlow to-purple-600 text-white font-semibold text-xs"
                           >
-                            Notarize On-Chain
+                            Notarize
                           </button>
                         )}
 
@@ -886,7 +972,7 @@
               </div>
             )}
 
-            {/* TAB 3: STANDALONE PROOF-OF-DOCUMENT VERIFY PORTAL */}
+            {/* TAB 3: VERIFY PORTAL */}
             {activeTab === "verify" && (
               <div className="max-w-3xl mx-auto glass-panel p-8 rounded-3xl space-y-6">
                 <div className="text-center space-y-2">
@@ -901,7 +987,6 @@
                   </p>
                 </div>
 
-                {/* Hash Input or File Drop */}
                 <div className="space-y-4">
                   <label className="border-2 border-dashed border-cyan-500/40 rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer bg-dark-800/40 hover:bg-dark-800 transition">
                     <input
@@ -930,57 +1015,36 @@
                   </div>
                 </div>
 
-                {/* Verification Verdict */}
                 {verifyResult && (
                   <div className={`p-6 rounded-2xl border ${
-                    verifyResult.status === 'VERIFIED' ? 'bg-cyan-950/40 border-cyan-500' :
-                    verifyResult.status === 'TAMPERED' ? 'bg-red-950/40 border-red-500' :
-                    'bg-amber-950/40 border-amber-500'
+                    verifyResult.status === 'VERIFIED' ? 'bg-cyan-950/40 border-cyan-500' : 'bg-red-950/40 border-red-500'
                   } space-y-4`}>
                     <div className="flex items-center space-x-3">
-                      <span className="text-3xl">
-                        {verifyResult.status === 'VERIFIED' ? '✅' : verifyResult.status === 'TAMPERED' ? '⚠️' : '❓'}
-                      </span>
+                      <span className="text-3xl">{verifyResult.status === 'VERIFIED' ? '✅' : '⚠️'}</span>
                       <div>
                         <h4 className="text-lg font-bold text-white font-mono">{verifyResult.status}</h4>
                         <p className="text-xs text-gray-300">{verifyResult.message}</p>
                       </div>
                     </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono pt-2 border-t border-white/10">
-                      <div>
-                        <span className="text-gray-400">File SHA-256:</span>
-                        <p className="text-white truncate">{verifyResult.file_sha256}</p>
-                      </div>
-                      {verifyResult.uploader_wallet && (
-                        <div>
-                          <span className="text-gray-400">Notarized By:</span>
-                          <p className="text-cyanGlow truncate">{verifyResult.uploader_wallet}</p>
-                        </div>
-                      )}
-                      {verifyResult.polygonscan_url && (
-                        <div className="sm:col-span-2">
-                          <a
-                            href={verifyResult.polygonscan_url}
-                            target="_blank"
-                            className="inline-flex items-center space-x-1 text-cyanGlow hover:underline text-xs"
-                          >
-                            <span>🔗 View Polygonscan Explorer Transaction & Blockchain Proof</span>
-                          </a>
-                        </div>
-                      )}
-                    </div>
+                    {verifyResult.polygonscan_url && (
+                      <a
+                        href={verifyResult.polygonscan_url}
+                        target="_blank"
+                        className="text-cyanGlow hover:underline text-xs font-mono block pt-2 border-t border-white/10"
+                      >
+                        🔗 View Polygonscan Explorer Transaction & Blockchain Proof
+                      </a>
+                    )}
                   </div>
                 )}
               </div>
             )}
           </main>
 
-          {/* SPLIT VIEW MODAL (Original Document Left vs Extracted Fields Right) */}
+          {/* SPLIT VIEW MODAL */}
           {selectedDoc && (
             <div className="fixed inset-0 z-50 bg-dark-900/90 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto">
               <div className="glass-panel w-full max-w-5xl rounded-3xl border border-white/15 overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
-                {/* Modal Header */}
                 <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-dark-850">
                   <div className="flex items-center space-x-3">
                     <span className="text-xl">
@@ -997,32 +1061,24 @@
                   </div>
                   <button
                     onClick={() => setSelectedDoc(null)}
-                    className="w-8 h-8 rounded-lg bg-dark-700 hover:bg-dark-600 text-gray-300 flex items-center justify-center text-sm"
+                    className="w-8 h-8 rounded-lg bg-dark-700 text-gray-300 flex items-center justify-center text-sm"
                   >
                     ✕
                   </button>
                 </div>
 
-                {/* Modal Body: Split View */}
                 <div className="flex-1 grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-white/10 overflow-y-auto">
-                  {/* LEFT: Document Physical Preview */}
+                  {/* Left: File details */}
                   <div className="p-6 bg-dark-900 flex flex-col items-center justify-center space-y-4">
                     <div className="w-full h-80 rounded-2xl border border-white/10 bg-dark-850 flex flex-col items-center justify-center p-6 text-center space-y-3 relative overflow-hidden">
                       <div className="text-5xl">📄</div>
                       <p className="text-sm font-bold text-white font-mono">{selectedDoc.original_filename}</p>
                       <p className="text-xs text-gray-400">Classified as <span className="text-cyanGlow font-bold">{selectedDoc.document_type}</span></p>
-
-                      <div className="w-full pt-4 border-t border-white/10 space-y-1 text-left text-[11px] font-mono text-gray-400">
-                        <p>Total Size: 1.2 MB</p>
-                        <p>Format: MIME application/pdf</p>
-                        <p className="truncate">Data Hash: {selectedDoc.data_sha256 || "0x..."}</p>
-                      </div>
                     </div>
 
-                    {/* Web3 Notarization Status Bar */}
                     <div className="w-full p-4 rounded-xl glass-panel border border-cyanGlow/20 flex items-center justify-between">
                       <div>
-                        <span className="text-[10px] text-gray-400 uppercase font-mono tracking-wider">Proof-of-Document</span>
+                        <span className="text-[10px] text-gray-400 uppercase font-mono">Proof-of-Document</span>
                         <p className="text-xs font-bold text-white">{selectedDoc.on_chain_status}</p>
                       </div>
                       {selectedDoc.on_chain_status === 'NOTARIZED' ? (
@@ -1044,88 +1100,48 @@
                     </div>
                   </div>
 
-                  {/* RIGHT: Extracted JSON & Confidence Badges */}
+                  {/* Right: Extracted fields */}
                   <div className="p-6 space-y-6 overflow-y-auto bg-dark-850">
-                    {/* Status & Badges */}
                     <div className="flex flex-wrap gap-2">
                       <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-dark-700 text-cyanGlow border border-cyan-500/30">
-                        Overall Confidence: {(selectedDoc.overall_confidence * 100).toFixed(0)}%
+                        Confidence: {(selectedDoc.overall_confidence * 100).toFixed(0)}%
                       </span>
-                      <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
-                        selectedDoc.validation_status === 'VALID' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-amber-950 text-amber-400 border border-amber-800'
-                      }`}>
-                        Validation: {selectedDoc.validation_status}
+                      <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
+                        {selectedDoc.validation_status}
                       </span>
-                      <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
-                        selectedDoc.fraud_status === 'CLEAN' ? 'bg-cyan-950 text-cyan-400 border border-cyan-800' : 'bg-red-950 text-red-400 border border-red-800'
-                      }`}>
-                        Fraud: {selectedDoc.fraud_status}
+                      <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-cyan-950 text-cyan-400 border border-cyan-800">
+                        {selectedDoc.fraud_status}
                       </span>
                     </div>
 
-                    {/* Fraud Alerts if any */}
                     {selectedDoc.fraud_reasons && selectedDoc.fraud_reasons.length > 0 && (
                       <div className="p-3 rounded-xl bg-red-950/40 border border-red-500/40 text-red-300 text-xs space-y-1">
-                        <p className="font-bold">⚠️ Anomaly / Duplicate Flags:</p>
+                        <p className="font-bold">⚠️ Anomaly Flags:</p>
                         {selectedDoc.fraud_reasons.map((r, i) => (
                           <p key={i} className="text-[11px]">• {r}</p>
                         ))}
                       </div>
                     )}
 
-                    {/* Extracted Fields */}
-                    <div className="space-y-3">
-                      <h4 className="text-xs font-bold uppercase text-gray-400 tracking-wider font-mono">Verified Entities</h4>
-                      <div className="grid grid-cols-2 gap-3 text-xs">
-                        <div className="p-3 rounded-xl bg-dark-800 border border-white/5">
-                          <span className="text-gray-400 text-[10px]">Vendor / Entity:</span>
-                          <p className="font-bold text-white mt-0.5">{selectedDoc.extracted_data?.vendor?.name || "N/A"}</p>
-                        </div>
-                        <div className="p-3 rounded-xl bg-dark-800 border border-white/5">
-                          <span className="text-gray-400 text-[10px]">Indian GSTIN:</span>
-                          <p className="font-mono font-bold text-cyanGlow mt-0.5">{selectedDoc.extracted_data?.vendor?.gstin || "N/A"}</p>
-                        </div>
-                        <div className="p-3 rounded-xl bg-dark-800 border border-white/5">
-                          <span className="text-gray-400 text-[10px]">Document Reference:</span>
-                          <p className="font-mono text-white mt-0.5">{selectedDoc.extracted_data?.document_number || "N/A"}</p>
-                        </div>
-                        <div className="p-3 rounded-xl bg-dark-800 border border-white/5">
-                          <span className="text-gray-400 text-[10px]">Due Date:</span>
-                          <p className="font-mono text-white mt-0.5">{selectedDoc.extracted_data?.due_date || "None (Point of Sale)"}</p>
-                        </div>
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div className="p-3 rounded-xl bg-dark-800 border border-white/5">
+                        <span className="text-gray-400 text-[10px]">Vendor:</span>
+                        <p className="font-bold text-white mt-0.5">{selectedDoc.extracted_data?.vendor?.name || "N/A"}</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-dark-800 border border-white/5">
+                        <span className="text-gray-400 text-[10px]">GSTIN:</span>
+                        <p className="font-mono font-bold text-cyanGlow mt-0.5">{selectedDoc.extracted_data?.vendor?.gstin || "N/A"}</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-dark-800 border border-white/5">
+                        <span className="text-gray-400 text-[10px]">Document Ref:</span>
+                        <p className="font-mono text-white mt-0.5">{selectedDoc.extracted_data?.document_number || "N/A"}</p>
+                      </div>
+                      <div className="p-3 rounded-xl bg-dark-800 border border-white/5">
+                        <span className="text-gray-400 text-[10px]">Due Date:</span>
+                        <p className="font-mono text-white mt-0.5">{selectedDoc.extracted_data?.due_date || "Point of Sale"}</p>
                       </div>
                     </div>
 
-                    {/* Line Items Table if invoice/receipt */}
-                    {selectedDoc.extracted_data?.line_items && selectedDoc.extracted_data.line_items.length > 0 && (
-                      <div className="space-y-2">
-                        <h4 className="text-xs font-bold uppercase text-gray-400 tracking-wider font-mono">Line Items Breakdown</h4>
-                        <div className="border border-white/5 rounded-xl overflow-hidden">
-                          <table className="w-full text-left text-xs">
-                            <thead className="bg-dark-800 text-gray-400 text-[10px]">
-                              <tr>
-                                <th className="p-2">Description</th>
-                                <th className="p-2">Qty</th>
-                                <th className="p-2 text-right">Unit Price</th>
-                                <th className="p-2 text-right">Total</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-white/5 text-gray-300">
-                              {selectedDoc.extracted_data.line_items.map((item, i) => (
-                                <tr key={i}>
-                                  <td className="p-2 text-white">{item.description}</td>
-                                  <td className="p-2 font-mono">{item.quantity}</td>
-                                  <td className="p-2 font-mono text-right">₹{item.unit_price.toFixed(2)}</td>
-                                  <td className="p-2 font-mono text-right text-cyanGlow">₹{item.total_price.toFixed(2)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Financial Totals */}
                     {selectedDoc.extracted_data?.total_amount > 0 && (
                       <div className="p-4 rounded-xl bg-dark-800 border border-white/10 flex justify-between items-center text-xs font-mono">
                         <div>
@@ -1139,73 +1155,54 @@
                       </div>
                     )}
 
-                    {/* SMART ACTIONS CARD */}
-                    {selectedDoc.smart_actions && (
-                      <div className="p-4 rounded-xl bg-gradient-to-r from-purple-950/40 to-dark-800 border border-purple-500/30 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-purple-300">⚡ AI Smart Action Trigger</span>
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-purple-900 text-purple-200">
-                            {selectedDoc.smart_actions.payment_priority || "Action Ready"}
-                          </span>
-                        </div>
-
-                        {selectedDoc.smart_actions.email_draft && (
-                          <div className="space-y-2">
-                            <p className="text-xs text-gray-300">Personalized Outreach Email:</p>
-                            <textarea
-                              readOnly
-                              rows="3"
-                              value={selectedDoc.smart_actions.email_draft}
-                              className="w-full text-xs font-mono p-2 rounded-lg bg-dark-900 border border-white/10 text-gray-300"
-                            />
-                            <div className="flex space-x-2">
-                              <button
-                                onClick={() => {
-                                  navigator.clipboard.writeText(selectedDoc.smart_actions.email_draft);
-                                  triggerToast("Email draft copied to clipboard!");
-                                }}
-                                className="px-3 py-1 rounded bg-cyanGlow text-dark-900 font-bold text-xs"
-                              >
-                                Copy Email Draft
-                              </button>
-                              <button
-                                onClick={() => {
-                                  navigator.clipboard.writeText(selectedDoc.smart_actions.whatsapp_message);
-                                  triggerToast("WhatsApp message copied to clipboard!");
-                                }}
-                                className="px-3 py-1 rounded bg-emerald-500 text-dark-900 font-bold text-xs"
-                              >
-                                Copy WhatsApp 💬
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {selectedDoc.smart_actions.due_date_alert && (
-                          <p className="text-xs text-gray-300 font-medium">
-                            🔔 {selectedDoc.smart_actions.due_date_alert}
-                          </p>
-                        )}
+                    {selectedDoc.smart_actions?.email_draft && (
+                      <div className="p-4 rounded-xl bg-purple-950/40 border border-purple-500/30 space-y-2 text-xs">
+                        <p className="text-purple-300 font-bold">Personalized Outreach Email:</p>
+                        <textarea readOnly rows="3" value={selectedDoc.smart_actions.email_draft} className="w-full text-xs font-mono p-2 rounded-lg bg-dark-900 border border-white/10 text-gray-300" />
+                        <button onClick={() => { navigator.clipboard.writeText(selectedDoc.smart_actions.email_draft); triggerToast("Copied email draft!"); }} className="px-3 py-1 rounded bg-cyanGlow text-dark-900 font-bold text-xs">Copy Email</button>
                       </div>
                     )}
-
-                    {/* Export Actions */}
-                    <div className="pt-2 flex flex-wrap gap-2">
-                      <a
-                        href={`${API_BASE}/documents/${selectedDoc.id}/export/tally`}
-                        className="px-3 py-1.5 rounded-lg bg-dark-700 hover:bg-dark-600 text-xs text-cyan-300 border border-cyan-500/20"
-                      >
-                        📥 Tally Prime XML
-                      </a>
-                      <a
-                        href={`${API_BASE}/documents/${selectedDoc.id}/export/zoho`}
-                        target="_blank"
-                        className="px-3 py-1.5 rounded-lg bg-dark-700 hover:bg-dark-600 text-xs text-purple-300 border border-purple-500/20"
-                      >
-                        📥 Zoho Books JSON
-                      </a>
-                    </div>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* GEMINI API KEY SETTINGS MODAL */}
+          {showApiKeyModal && (
+            <div className="fixed inset-0 z-50 bg-dark-900/90 backdrop-blur-md flex items-center justify-center p-6">
+              <div className="glass-panel w-full max-w-md rounded-3xl border border-cyanGlow/40 p-6 space-y-4">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-lg font-bold text-white flex items-center space-x-2">
+                    <span>🔑</span>
+                    <span>Set Google Gemini API Key</span>
+                  </h3>
+                  <button onClick={() => setShowApiKeyModal(false)} className="text-gray-400 hover:text-white">✕</button>
+                </div>
+                <p className="text-xs text-gray-300">
+                  Enter your Google Gemini API key to enable 100% live vision extraction on your exact uploaded documents. (Key is stored safely in your browser).
+                </p>
+                <input
+                  type="password"
+                  placeholder="AIzaSy..."
+                  value={customApiKey}
+                  onChange={(e) => setCustomApiKey(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl bg-dark-850 border border-white/15 text-xs font-mono text-white focus:outline-none focus:border-cyanGlow"
+                />
+                <div className="flex justify-between items-center pt-2">
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    className="text-[11px] text-cyanGlow hover:underline"
+                  >
+                    Get a Free Key from Google AI Studio ↗
+                  </a>
+                  <button
+                    onClick={() => saveApiKey(customApiKey)}
+                    className="px-4 py-2 rounded-xl bg-cyanGlow text-dark-900 font-bold text-xs"
+                  >
+                    Save & Enable Live AI
+                  </button>
                 </div>
               </div>
             </div>
@@ -1222,71 +1219,36 @@
               </button>
             ) : (
               <div className="glass-panel w-96 rounded-3xl border border-cyanGlow/40 shadow-2xl flex flex-col h-[520px] overflow-hidden animate-slide-up">
-                {/* Chat Header */}
                 <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between bg-dark-850">
                   <div className="flex items-center space-x-2">
                     <span className="text-lg">🤖</span>
                     <div>
                       <h4 className="font-bold text-white text-xs">Ask BizLens AI</h4>
-                      <p className="text-[10px] text-cyan-400">Safe Parameterized Ledger Search</p>
+                      <p className="text-[10px] text-cyan-400">Safe Parameterized Search</p>
                     </div>
                   </div>
-                  <button
-                    onClick={() => setShowChatDrawer(false)}
-                    className="w-6 h-6 rounded-md bg-dark-700 text-gray-400 hover:text-white flex items-center justify-center text-xs"
-                  >
-                    ✕
-                  </button>
+                  <button onClick={() => setShowChatDrawer(false)} className="text-gray-400 hover:text-white text-xs">✕</button>
                 </div>
 
-                {/* Chat Messages Body */}
                 <div className="flex-1 p-4 overflow-y-auto space-y-3 text-xs">
                   {chatMessages.map((msg, i) => (
                     <div
                       key={i}
                       className={`p-3 rounded-2xl max-w-[85%] ${
-                        msg.role === 'user' ? 'ml-auto bg-cyanGlow text-dark-900 font-medium rounded-tr-none' : 'bg-dark-800 text-gray-200 border border-white/5 rounded-tl-none space-y-2'
+                        msg.role === 'user' ? 'ml-auto bg-cyanGlow text-dark-900 font-medium' : 'bg-dark-800 text-gray-200 border border-white/5'
                       }`}
                     >
                       <p>{msg.text}</p>
-                      {msg.citations && msg.citations.length > 0 && (
-                        <div className="pt-2 border-t border-white/10 space-y-1">
-                          <p className="text-[10px] text-cyan-400 font-bold uppercase">Citations:</p>
-                          {msg.citations.map((c, ci) => (
-                            <div key={ci} className="text-[10px] font-mono text-gray-300 flex justify-between">
-                              <span>#{c.document_id} {c.vendor_name}</span>
-                              <span className="text-cyanGlow">₹{c.amount}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   ))}
                   {chatLoading && (
-                    <div className="p-3 rounded-2xl bg-dark-800 text-cyanGlow max-w-[80%] flex items-center space-x-2">
-                      <span className="animate-spin text-sm">⚙️</span>
-                      <span>Consulting ledger schema...</span>
+                    <div className="p-3 rounded-2xl bg-dark-800 text-cyanGlow text-xs flex items-center space-x-2">
+                      <span className="animate-spin">⚙️</span>
+                      <span>Consulting ledger...</span>
                     </div>
                   )}
                 </div>
 
-                {/* Quick Prompts */}
-                <div className="px-3 py-1.5 bg-dark-900 border-t border-white/5 flex space-x-2 overflow-x-auto text-[10px]">
-                  <button
-                    onClick={() => setChatInput("How much did we spend on IT and cloud services?")}
-                    className="whitespace-nowrap px-2 py-0.5 rounded bg-dark-800 hover:bg-dark-700 text-gray-300"
-                  >
-                    Cloud spend?
-                  </button>
-                  <button
-                    onClick={() => setChatInput("Show pending invoices due soon")}
-                    className="whitespace-nowrap px-2 py-0.5 rounded bg-dark-800 hover:bg-dark-700 text-gray-300"
-                  >
-                    Pending bills?
-                  </button>
-                </div>
-
-                {/* Chat Input */}
                 <div className="p-3 border-t border-white/10 bg-dark-850 flex space-x-2">
                   <input
                     type="text"
@@ -1296,71 +1258,11 @@
                     onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                     className="flex-1 px-3 py-2 rounded-xl bg-dark-800 border border-white/10 text-xs text-white focus:outline-none focus:border-cyanGlow"
                   />
-                  <button
-                    onClick={handleSendMessage}
-                    className="px-3 py-2 rounded-xl bg-cyanGlow text-dark-900 font-bold text-xs"
-                  >
-                    Send
-                  </button>
+                  <button onClick={handleSendMessage} className="px-3 py-2 rounded-xl bg-cyanGlow text-dark-900 font-bold text-xs">Send</button>
                 </div>
               </div>
             )}
           </div>
-
-          {/* PRICING MODAL */}
-          {showPricingModal && (
-            <div className="fixed inset-0 z-50 bg-dark-900/90 backdrop-blur-md flex items-center justify-center p-6">
-              <div className="glass-panel w-full max-w-3xl rounded-3xl border border-white/10 p-8 space-y-6">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h3 className="text-2xl font-extrabold text-white">BizLens AI Plans & Freemium Tiers</h3>
-                    <p className="text-xs text-gray-400">Scale your accounting automation with enterprise proof-of-document</p>
-                  </div>
-                  <button onClick={() => setShowPricingModal(false)} className="text-gray-400 hover:text-white">✕</button>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="glass-panel p-5 rounded-2xl border border-white/10 space-y-3">
-                    <span className="text-xs font-bold text-gray-400 uppercase font-mono">Free Tier</span>
-                    <h4 className="text-2xl font-extrabold text-white">₹0<span className="text-xs text-gray-400">/mo</span></h4>
-                    <p className="text-xs text-gray-400">50 document scans/month. Gemini 2.5 Flash extraction. Community support.</p>
-                    <button className="w-full py-2 rounded-xl bg-dark-700 text-white text-xs font-bold">Current Plan</button>
-                  </div>
-
-                  <div className="glass-panel-glow p-5 rounded-2xl border border-cyanGlow space-y-3 relative">
-                    <span className="absolute -top-3 right-4 px-2 py-0.5 rounded-full bg-cyanGlow text-dark-900 text-[10px] font-extrabold">POPULAR</span>
-                    <span className="text-xs font-bold text-cyanGlow uppercase font-mono">Pro Tier</span>
-                    <h4 className="text-2xl font-extrabold text-white">₹499<span className="text-xs text-gray-400">/mo</span></h4>
-                    <p className="text-xs text-gray-400">Unlimited scans. Automated on-chain notarization on Polygon. Priority SLA & Tally export.</p>
-                    <button
-                      onClick={() => {
-                        triggerToast("Upgraded to Pro Tier! Unlimited document scanning unlocked.");
-                        setShowPricingModal(false);
-                      }}
-                      className="w-full py-2 rounded-xl bg-cyanGlow text-dark-900 text-xs font-bold"
-                    >
-                      Upgrade to Pro
-                    </button>
-                  </div>
-
-                  <div className="glass-panel p-5 rounded-2xl border border-white/10 space-y-3">
-                    <span className="text-xs font-bold text-purple-400 uppercase font-mono">Enterprise</span>
-                    <h4 className="text-2xl font-extrabold text-white">Custom</h4>
-                    <p className="text-xs text-gray-400">Custom Polygon Subnet, multi-tenant ERP sync, dedicated fine-tuned Gemini model.</p>
-                    <button
-                      onClick={() => {
-                        triggerToast("Our sales team has received your enterprise inquiry.");
-                        setShowPricingModal(false);
-                      }}
-                      className="w-full py-2 rounded-xl bg-purple-600 text-white text-xs font-bold"
-                    >
-                      Contact Sales
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       );
     }
