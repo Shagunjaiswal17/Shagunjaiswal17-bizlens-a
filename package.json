@@ -1,0 +1,25 @@
+{
+  "name": "bizlens-ai",
+  "version": "1.0.0",
+  "description": "Enterprise AI Smart Document Processing, GSTIN Validation, Fraud Engine & Proof-of-Document on Polygon Amoy",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "ai",
+    "gemini",
+    "fintech",
+    "polygon",
+    "amoy",
+    "web3",
+    "accounting",
+    "gstin"
+  ],
+  "author": "BizLens AI",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
