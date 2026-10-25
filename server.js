@@ -460,8 +460,8 @@ function parseMultipart(buffer, boundary) {
   return parts;
 }
 
-// HTTP Server
-const server = http.createServer(async (req, res) => {
+// Request Handler Function
+async function handleRequest(req, res) {
   const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = parsedUrl.pathname;
   const method = req.method.toUpperCase();
@@ -474,6 +474,12 @@ const server = http.createServer(async (req, res) => {
   if (method === 'OPTIONS') {
     res.writeHead(204);
     return res.end();
+  }
+
+  // Health check for reverse-proxy gateways
+  if (pathname === '/health' || pathname === '/healthz' || pathname === '/ping') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ status: 'healthy', timestamp: Date.now() }));
   }
 
   // 1. API: Analytics Summary
@@ -738,10 +744,24 @@ const server = http.createServer(async (req, res) => {
 
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('Not Found');
+}
+
+// Bind primary server to configured PORT
+const PRIMARY_PORT = parseInt(process.env.PORT || '8000', 10);
+const primaryServer = http.createServer(handleRequest);
+
+primaryServer.listen(PRIMARY_PORT, '0.0.0.0', () => {
+  console.log(`[BizLens AI] Primary Production Server live on http://0.0.0.0:${PRIMARY_PORT}`);
+  console.log(`[BizLens AI] Dashboard URL: http://localhost:${PRIMARY_PORT}/`);
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[BizLens AI] Node.js Production Server live on http://0.0.0.0:${PORT}`);
-  console.log(`[BizLens AI] Dashboard URL: http://localhost:${PORT}/`);
-  console.log(`[BizLens AI] Ready for PieHost Node Application Deployment`);
-});
+// Bind secondary listener on port 3000 (PieHost default Node port) if different
+if (PRIMARY_PORT !== 3000) {
+  try {
+    const backupServer3000 = http.createServer(handleRequest);
+    backupServer3000.listen(3000, '0.0.0.0', () => {
+      console.log(`[BizLens AI] Secondary listener live on http://0.0.0.0:3000`);
+    });
+    backupServer3000.on('error', () => {});
+  } catch (e) {}
+}
