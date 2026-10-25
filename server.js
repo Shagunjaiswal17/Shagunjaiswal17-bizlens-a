@@ -746,22 +746,27 @@ async function handleRequest(req, res) {
   res.end('Not Found');
 }
 
-// Bind primary server to configured PORT
-const PRIMARY_PORT = parseInt(process.env.PORT || '8000', 10);
-const primaryServer = http.createServer(handleRequest);
-
-primaryServer.listen(PRIMARY_PORT, '0.0.0.0', () => {
-  console.log(`[BizLens AI] Primary Production Server live on http://0.0.0.0:${PRIMARY_PORT}`);
-  console.log(`[BizLens AI] Dashboard URL: http://localhost:${PRIMARY_PORT}/`);
-});
-
-// Bind secondary listener on port 3000 (PieHost default Node port) if different
-if (PRIMARY_PORT !== 3000) {
+// Resilient Multi-Port Server Initializer
+function startListener(port) {
   try {
-    const backupServer3000 = http.createServer(handleRequest);
-    backupServer3000.listen(3000, '0.0.0.0', () => {
-      console.log(`[BizLens AI] Secondary listener live on http://0.0.0.0:3000`);
+    const s = http.createServer(handleRequest);
+    s.on('error', (err) => {
+      console.warn(`[BizLens AI] Port ${port} notice: ${err.message}`);
     });
-    backupServer3000.on('error', () => {});
-  } catch (e) {}
+    s.listen(port, '0.0.0.0', () => {
+      console.log(`[BizLens AI] Production Server live on http://0.0.0.0:${port}`);
+    });
+    return s;
+  } catch (e) {
+    console.warn(`[BizLens AI] Could not initialize port ${port}: ${e.message}`);
+  }
+}
+
+// Bind all common cloud proxy ports (3000, 8000, 8080, 5000) so PieHost always connects
+const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : null;
+const candidatePorts = [3000, envPort, 8000, 8080, 5000].filter(Boolean);
+const uniquePorts = [...new Set(candidatePorts)];
+
+for (const p of uniquePorts) {
+  startListener(p);
 }
