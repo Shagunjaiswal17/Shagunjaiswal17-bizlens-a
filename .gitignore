@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Database & Uploads
+*.db
+*.sqlite
+*.sqlite3
+uploads/
+
+# Node & Hardhat
+node_modules/
+contracts/node_modules/
+frontend/node_modules/
+contracts/cache/
+contracts/artifacts/
+contracts/typechain-types/
+
+# Environment & Secrets
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
