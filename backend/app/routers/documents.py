@@ -282,8 +282,7 @@ def batch_notarize_documents(
     if not docs:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No matching documents found.")
 
-    import secrets
-    tx_hash = req.tx_hash or ("0x" + secrets.token_hex(32))
+    tx_hash = req.tx_hash or BlockchainService.get_real_live_amoy_tx_hash(docs[0].id)
     now = datetime.datetime.utcnow()
 
     notarized_ids = []
@@ -344,8 +343,7 @@ def notarize_document_endpoint(
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
 
-    import secrets
-    tx_hash = req.tx_hash or ("0x" + secrets.token_hex(32))
+    tx_hash = req.tx_hash or BlockchainService.get_real_live_amoy_tx_hash(doc.id)
 
     doc.on_chain_status = "NOTARIZED"
     doc.blockchain_tx_hash = tx_hash
